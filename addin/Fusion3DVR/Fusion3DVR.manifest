@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "8f6b1d3e-4c2a-4e8f-9a51-3d7c0f2b6e91",
+  "author": "Fusion3D VR",
+  "description": {
+    "": "Affiche les corps Fusion dans un casque Meta Quest (WebXR) via l'app Fusion3D VR."
+  },
+  "version": "1.0.0",
+  "runOnStartup": true,
+  "supportedOS": "mac|windows",
+  "editEnabled": true
+}

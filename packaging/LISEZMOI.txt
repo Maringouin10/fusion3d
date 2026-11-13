@@ -1,0 +1,14 @@
+FUSION3D VR - Fusion 360 -> Meta Quest 3 / 3S
+
+1. Glissez « Fusion3D VR » dans le dossier Applications.
+2. Premier lancement : clic droit sur l'app > Ouvrir > Ouvrir
+   (l'app n'est pas signée par Apple). Si macOS refuse encore :
+   Réglages Système > Confidentialité et sécurité > « Ouvrir quand même ».
+   Autorisez l'accès au « réseau local » si macOS le demande.
+3. L'app installe automatiquement le complément dans Fusion et affiche
+   une icône de casque dans la barre des menus + une page d'aide.
+4. Dans Fusion : Utilitaires > Compléments (Maj+S) > Fusion3DVR > Exécuter
+   (ou redémarrez Fusion).
+5. Clic droit sur un corps dans l'arbre > « Voir dans le casque VR ».
+6. Dans le casque (même Wi-Fi) : navigateur > https://<adresse affichée>:8443
+   > Paramètres avancés > Continuer > « Entrer en VR ».

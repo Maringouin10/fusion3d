@@ -1,0 +1,25 @@
+:root { --bg: #161a22; --panel: rgba(28, 33, 44, .92); --fg: #e8ecf3; --muted: #9aa4b5; --accent: #40a0ff; --ok: #4fc879; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+canvas { display: block; }
+#ui { position: absolute; top: 16px; left: 16px; width: 340px; max-height: calc(100% - 32px); overflow: auto; background: var(--panel); border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+header { display: flex; justify-content: space-between; align-items: center; }
+.logo { font-weight: 800; font-size: 20px; } .logo span { color: var(--accent); }
+.pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; background: #3a2a2a; color: #f39a9a; }
+.pill.on { background: #1f3a2a; color: var(--ok); }
+#doc { margin: 12px 0; color: var(--muted); font-size: 14px; }
+.buttons { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.buttons.small { flex-direction: row; } .buttons.small button { flex: 1; }
+button { font: inherit; color: var(--fg); background: #2b3242; border: 1px solid #3b4558; border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+button:hover:not(:disabled) { background: #343d50; }
+button:disabled { opacity: .4; cursor: default; }
+button.big { font-size: 18px; font-weight: 700; padding: 14px; background: var(--accent); border: none; color: #fff; }
+button.big.alt { background: #7a5cff; }
+.note { font-size: 12px; color: var(--muted); }
+#bodies { list-style: none; padding: 0; margin: 12px 0 0; font-size: 14px; }
+#bodies li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+#bodies .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+#bodies label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help { margin-top: 12px; font-size: 13px; color: var(--muted); }
+.help summary { cursor: pointer; color: var(--fg); }
+.help ul { padding-left: 18px; }

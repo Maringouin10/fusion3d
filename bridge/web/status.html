@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fusion3D VR — connexion du casque</title>
+  <style>
+    :root { --bg:#161a22; --panel:#1f2430; --fg:#e8ecf3; --muted:#9aa4b5; --accent:#40a0ff; --ok:#4fc879; --ko:#f39a9a; }
+    body { margin:0; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,sans-serif; }
+    main { max-width:760px; margin:40px auto; padding:0 20px; }
+    h1 { font-size:28px; } h1 span { color:var(--accent); }
+    .card { background:var(--panel); border-radius:16px; padding:20px 24px; margin:16px 0; }
+    .url { font:700 34px ui-monospace,Menlo,monospace; color:var(--accent); word-break:break-all; user-select:all; }
+    .row { display:flex; gap:12px; align-items:center; margin:6px 0; }
+    .dot { width:12px; height:12px; border-radius:50%; background:var(--ko); flex:none; }
+    .dot.on { background:var(--ok); }
+    ol li { margin:8px 0; line-height:1.45; } .muted { color:var(--muted); font-size:14px; }
+    button { font:inherit; color:var(--fg); background:#2b3242; border:1px solid #3b4558; border-radius:10px; padding:8px 14px; cursor:pointer; }
+    a { color:var(--accent); }
+    code { background:#2b3242; padding:1px 6px; border-radius:5px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Fusion3D <span>VR</span></h1>
+
+  <div class="card">
+    <div class="muted">Dans le casque Meta Quest, ouvrez le navigateur et tapez :</div>
+    <div id="urls" class="url">…</div>
+    <div class="muted" id="other-urls"></div>
+  </div>
+
+  <div class="card">
+    <div class="row"><span id="d-fusion" class="dot"></span><span id="t-fusion">Fusion : aucun envoi pour l'instant</span></div>
+    <div class="row"><span id="d-head" class="dot"></span><span id="t-head">Casque : non connecté</span></div>
+    <div class="muted" id="bodies"></div>
+  </div>
+
+  <div class="card">
+    <b>Première utilisation</b>
+    <ol>
+      <li>Le Mac et le casque doivent être sur <b>le même Wi-Fi</b>.</li>
+      <li>Dans Fusion : <b>Utilitaires › Compléments</b> (<code>Maj+S</code>) › onglet <i>Compléments</i> ›
+        <b>Fusion3DVR</b> › <b>Exécuter</b> (cochez « Au démarrage »). <button id="reinstall">Réinstaller le complément</button>
+        <div class="muted" id="reinstall-msg"></div></li>
+      <li>Dans l'arbre de Fusion : <b>clic droit sur un corps</b> (ou un composant) › <b>Voir dans le casque VR</b>.
+        Le panneau <b>CASQUE VR</b> de l'onglet SOLIDE propose aussi « Tout envoyer ».</li>
+      <li>Dans le casque, ouvrez l'adresse ci-dessus. Le navigateur affiche « connexion non privée » (certificat local) :
+        <b>Paramètres avancés › Continuer vers le site</b>. Ajoutez la page aux favoris.</li>
+      <li>Appuyez sur <b>Entrer en VR</b> ou <b>Réalité mixte</b>. Chaque modification dans Fusion se met à jour en direct.</li>
+    </ol>
+    <a href="/" target="_blank">Aperçu 3D sur ce Mac</a>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  async function tick() {
+    try {
+      const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      $('urls').textContent = s.vrUrls[0] || 'Aucun réseau détecté';
+      $('other-urls').textContent = s.vrUrls.length > 1 ? 'Autres adresses possibles : ' + s.vrUrls.slice(1).join(', ') : '';
+      const pushed = !!s.lastPush;
+      $('d-fusion').className = 'dot' + (pushed ? ' on' : '');
+      $('t-fusion').textContent = pushed
+        ? `Fusion : « ${s.document} » — ${s.bodies.length} corps (dernier envoi ${new Date(s.lastPush * 1000).toLocaleTimeString()})`
+        : "Fusion : aucun envoi pour l'instant";
+      $('bodies').textContent = s.bodies.join(' • ');
+      $('d-head').className = 'dot' + (s.headsets.length ? ' on' : '');
+      $('t-head').textContent = s.headsets.length ? `Casque connecté (${s.headsets.join(', ')})` : 'Casque : non connecté';
+    } catch { $('t-fusion').textContent = "L'app Fusion3D VR ne répond pas"; }
+  }
+  $('reinstall').onclick = async () => {
+    const r = await fetch('/api/install-addin', { method: 'POST', body: '{}' });
+    $('reinstall-msg').textContent = (await r.json()).message || '';
+  };
+  tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>

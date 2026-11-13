@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fusion3D VR</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+</head>
+<body>
+  <div id="ui">
+    <header>
+      <div class="logo">Fusion3D <span>VR</span></div>
+      <div id="conn" class="pill off">hors ligne</div>
+    </header>
+    <div id="doc">En attente de Fusion…</div>
+    <div class="buttons">
+      <button id="btn-vr" class="big" disabled>Entrer en VR</button>
+      <button id="btn-ar" class="big alt" disabled>Réalité mixte (passthrough)</button>
+    </div>
+    <div id="xr-note" class="note"></div>
+    <div class="buttons small">
+      <button id="btn-reset">Réinitialiser</button>
+      <button id="btn-scale">Taille réelle</button>
+    </div>
+    <ul id="bodies"></ul>
+    <details class="help">
+      <summary>Commandes dans le casque</summary>
+      <ul>
+        <li><b>Gâchette</b> sur une pièce : la saisir et la déplacer seule</li>
+        <li><b>Gâchette</b> dans le vide ou <b>poignée (grip)</b> : saisir tout le modèle</li>
+        <li><b>Deux poignées</b> : agrandir / réduire en écartant les mains</li>
+        <li><b>Joystick droit</b> : ← → tourner, ↑ ↓ zoom</li>
+        <li><b>A</b> : réinitialiser • <b>B</b> : taille réelle / ajustée</li>
+        <li>Mains nues : <b>pincer</b> pour saisir</li>
+      </ul>
+    </details>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
