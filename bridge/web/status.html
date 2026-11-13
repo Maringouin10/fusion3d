@@ -37,6 +37,12 @@
   </div>
 
   <div class="card">
+    <div class="row"><b>Version <span id="version">…</span></b>
+      <button id="update">Mettre à jour maintenant</button></div>
+    <div class="muted" id="update-msg">Télécharge la dernière version depuis GitHub (app, site du casque et complément Fusion).</div>
+  </div>
+
+  <div class="card">
     <b>Première utilisation</b>
     <ol>
       <li>Le Mac et le casque doivent être sur <b>le même Wi-Fi</b>.</li>
@@ -57,6 +63,7 @@
   async function tick() {
     try {
       const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      $('version').textContent = s.version;
       $('urls').textContent = s.vrUrls[0] || 'Aucun réseau détecté';
       $('other-urls').textContent = s.vrUrls.length > 1 ? 'Autres adresses possibles : ' + s.vrUrls.slice(1).join(', ') : '';
       const pushed = !!s.lastPush;
@@ -72,6 +79,18 @@
   $('reinstall').onclick = async () => {
     const r = await fetch('/api/install-addin', { method: 'POST', body: '{}' });
     $('reinstall-msg').textContent = (await r.json()).message || '';
+  };
+  $('update').onclick = async () => {
+    $('update').disabled = true;
+    $('update-msg').textContent = 'Téléchargement depuis GitHub…';
+    try {
+      const r = await (await fetch('/api/update', { method: 'POST', body: '{}' })).json();
+      let msg = r.message;
+      if (r.addinChanged) msg += ' Dans Fusion : panneau CASQUE VR › « Mettre à jour maintenant » (ou redémarrez Fusion).';
+      if (r.restart) msg += " L'app redémarre…";
+      $('update-msg').textContent = msg;
+    } catch { $('update-msg').textContent = "L'app redémarre…"; }
+    setTimeout(() => { $('update').disabled = false; }, 4000);
   };
   tick(); setInterval(tick, 2000);
 </script>

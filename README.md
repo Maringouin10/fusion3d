@@ -40,6 +40,21 @@ Voir et manipuler ses modèles **Fusion 360** dans un casque **Meta Quest 3 / 3S
 | Réinitialiser | A (ou Y) | — |
 | Taille réelle ↔ taille ajustée | B (ou X) | — |
 
+## Mettre à jour maintenant
+
+Le bouton **Mettre à jour maintenant** télécharge le dernier code du dépôt GitHub
+(branche par défaut) et l'installe sans réinstaller le `.dmg`. On le trouve à trois endroits :
+- dans Fusion : panneau **CASQUE VR** › **Mettre à jour maintenant**. Le complément se recharge
+  tout seul, sans redémarrer Fusion ;
+- dans la barre des menus : icône casque › **Mettre à jour maintenant** ;
+- sur la page d'état (`http://127.0.0.1:8765/status`).
+
+L'app, le site du casque et le complément Fusion sont mis à jour ensemble. L'app redémarre si son
+propre code a changé ; dans le casque, il suffit de recharger la page. Une version GitHub qui
+contient une erreur de syntaxe, ou qui est plus ancienne que l'app, est refusée. Les fichiers
+téléchargés sont rangés dans `~/Library/Application Support/Fusion3D VR/current/`. Les nouvelles
+bibliothèques Python ne peuvent pas arriver par ce chemin : il faut alors un nouveau `.dmg`.
+
 ## À propos du bouton « à côté de l'œil »
 
 L'API de Fusion 360 ne permet **pas** d'ajouter une icône directement dans les lignes de l'arbre
@@ -66,6 +81,7 @@ pip install -r bridge/requirements.txt
 python3 bridge/fusion3d_bridge.py            # barre des menus (macOS)
 python3 bridge/fusion3d_bridge.py --headless # sans interface
 python3 tests/test_bridge.py                 # tests du pont
+python3 tests/test_update.py                 # tests de « Mettre à jour maintenant »
 ```
 
 Pour tester le complément sans l'app : copier `addin/Fusion3DVR` dans

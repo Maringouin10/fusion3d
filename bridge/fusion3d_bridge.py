@@ -17,6 +17,7 @@ import json
 import mimetypes
 import os
 import queue
+import re
 import shutil
 import socket
 import ssl
@@ -24,12 +25,18 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
+import zipfile
+import io
+import hashlib
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 APP_NAME = 'Fusion3D VR'
-VERSION = '1.0.0'
+VERSION = '1.1.0'
+# Mises à jour : archive de la branche par défaut du dépôt GitHub
+UPDATE_ZIP_URL = 'https://codeload.github.com/Maringouin10/fusion3d/zip/HEAD'
 LOCAL_PORT = 8765
 VR_PORT = 8443
 MAX_BODY = 512 * 1024 * 1024
@@ -51,7 +58,7 @@ def bundled(*parts):
     return os.path.join(os.path.dirname(base), *parts)
 
 
-WEB_DIR = bundled('web')
+WEB_DIR = bundled('web')                    # recalculés par refresh_paths()
 ADDIN_SRC = bundled('addin', 'Fusion3DVR')
 
 
@@ -98,6 +105,213 @@ def local_ips():
     ips.sort(key=lambda ip: (not ipaddress.ip_address(ip).is_private, ip))
     _ips_cache.update(t=now, ips=ips)
     return list(ips)
+
+
+# --------------------------------------------------------------------------
+# Mise à jour depuis GitHub (« Mettre à jour maintenant »)
+# --------------------------------------------------------------------------
+#
+# La dernière version est téléchargée dans
+#   ~/Library/Application Support/Fusion3D VR/current/
+#       web/  addin/Fusion3DVR/  fusion3d_bridge.py  VERSION
+# et prend le pas sur les fichiers intégrés au .app tant qu'elle n'est pas plus
+# ancienne que l'app (installer un .dmg plus récent reprend donc la main).
+
+_update_lock = threading.Lock()
+
+
+def parse_version(v):
+    nums = [int(x) for x in re.findall(r'\d+', v or '')[:3]]
+    return tuple(nums + [0] * (3 - len(nums)))
+
+
+def update_root():
+    return os.path.join(data_dir(), 'current')
+
+
+def override_version():
+    try:
+        with open(os.path.join(update_root(), 'VERSION')) as f:
+            return f.read().strip()
+    except OSError:
+        return ''
+
+
+def active_override():
+    """Dossier de la version téléchargée si elle doit être utilisée, sinon None."""
+    v = override_version()
+    root = update_root()
+    if v and parse_version(v) >= parse_version(VERSION) and os.path.isfile(os.path.join(root, 'web', 'index.html')):
+        return root
+    return None
+
+
+def refresh_paths():
+    global WEB_DIR, ADDIN_SRC
+    root = active_override()
+    WEB_DIR = os.path.join(root, 'web') if root else bundled('web')
+    ADDIN_SRC = os.path.join(root, 'addin', 'Fusion3DVR') if root else bundled('addin', 'Fusion3DVR')
+
+
+def bridge_source():
+    root = active_override()
+    if root:
+        return os.path.join(root, 'fusion3d_bridge.py')
+    return bundled('fusion3d_bridge.py') if getattr(sys, 'frozen', False) else os.path.abspath(__file__)
+
+
+def current_version():
+    root = active_override()
+    return override_version() if root else VERSION
+
+
+def _tree_hash(paths):
+    h = hashlib.sha256()
+    for base in paths:
+        if os.path.isfile(base):
+            h.update(open(base, 'rb').read())
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if name.endswith('.pyc') or name == '.DS_Store':
+                    continue
+                full = os.path.join(dirpath, name)
+                h.update(os.path.relpath(full, base).encode())
+                h.update(open(full, 'rb').read())
+    return h.hexdigest()
+
+
+def _file_hash(path):
+    try:
+        return hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    except OSError:
+        return ''
+
+
+def _download(url, timeout=60):
+    ctx = None
+    try:
+        import certifi  # le Python du .app n'a pas les certificats système
+        ctx = ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        ctx = ssl.create_default_context()
+    req = urllib.request.Request(url, headers={'User-Agent': 'Fusion3D-VR-updater'})
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        return r.read()
+
+
+def update_now(url=None):
+    """Télécharge la dernière version depuis GitHub et l'installe.
+
+    Retourne un dict : updated, version, message, restart (le pont doit redémarrer),
+    addinChanged (le complément Fusion doit se recharger)."""
+    if not _update_lock.acquire(blocking=False):
+        return {'updated': False, 'error': True, 'message': 'Mise à jour déjà en cours…'}
+    try:
+        try:
+            data = _download(url or UPDATE_ZIP_URL)
+        except Exception as e:  # réseau, certificat, GitHub indisponible…
+            return {'updated': False, 'error': True,
+                    'message': 'Téléchargement impossible depuis GitHub : %s' % e}
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(data))
+        except zipfile.BadZipFile:
+            return {'updated': False, 'error': True, 'message': 'Archive GitHub invalide.'}
+
+        staging = os.path.join(data_dir(), 'staging')
+        shutil.rmtree(staging, ignore_errors=True)
+        os.makedirs(staging)
+        prefix = zf.namelist()[0].split('/')[0] + '/'
+        real_staging = os.path.realpath(staging)
+        for info in zf.infolist():
+            if not info.filename.startswith(prefix) or info.is_dir():
+                continue
+            rel = info.filename[len(prefix):]
+            if not rel.startswith(('bridge/', 'addin/')):
+                continue
+            dst = os.path.realpath(os.path.join(staging, rel))
+            if not dst.startswith(real_staging + os.sep):
+                continue  # chemin suspect dans l'archive
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with zf.open(info) as src, open(dst, 'wb') as out:
+                shutil.copyfileobj(src, out)
+
+        new_bridge = os.path.join(staging, 'bridge', 'fusion3d_bridge.py')
+        new_addin = os.path.join(staging, 'addin', 'Fusion3DVR')
+        new_web = os.path.join(staging, 'bridge', 'web')
+        for needed in (new_bridge, os.path.join(new_addin, 'Fusion3DVR.py'), os.path.join(new_web, 'index.html')):
+            if not os.path.isfile(needed):
+                return {'updated': False, 'error': True,
+                        'message': 'Version GitHub incomplète (%s manquant).' % os.path.basename(needed)}
+        for py in (new_bridge, os.path.join(new_addin, 'Fusion3DVR.py')):
+            try:
+                compile(open(py, 'rb').read(), py, 'exec')
+            except SyntaxError as e:
+                return {'updated': False, 'error': True,
+                        'message': 'La version GitHub contient une erreur, mise à jour annulée : %s' % e}
+
+        m = re.search(r"^VERSION = '([^']+)'", open(new_bridge, encoding='utf-8').read(), re.M)
+        new_version = m.group(1) if m else '0'
+        if parse_version(new_version) < parse_version(VERSION):
+            return {'updated': False, 'version': VERSION,
+                    'message': "L'app (%s) est plus récente que GitHub (%s)." % (VERSION, new_version)}
+
+        old_web, old_addin, old_bridge = WEB_DIR, ADDIN_SRC, bridge_source()
+        changed_web = _tree_hash([old_web]) != _tree_hash([new_web])
+        changed_addin = _tree_hash([old_addin]) != _tree_hash([new_addin])
+        changed_bridge = _file_hash(old_bridge) != _file_hash(new_bridge)
+        if not (changed_web or changed_addin or changed_bridge):
+            shutil.rmtree(staging, ignore_errors=True)
+            return {'updated': False, 'version': current_version(),
+                    'message': 'Déjà à jour (version %s).' % current_version()}
+
+        nxt = os.path.join(data_dir(), 'next')
+        shutil.rmtree(nxt, ignore_errors=True)
+        os.makedirs(os.path.join(nxt, 'addin'))
+        shutil.copytree(new_web, os.path.join(nxt, 'web'))
+        shutil.copytree(new_addin, os.path.join(nxt, 'addin', 'Fusion3DVR'))
+        shutil.copy2(new_bridge, os.path.join(nxt, 'fusion3d_bridge.py'))
+        with open(os.path.join(nxt, 'VERSION'), 'w') as f:
+            f.write(new_version)
+        root = update_root()
+        old = root + '.old'
+        shutil.rmtree(old, ignore_errors=True)
+        if os.path.exists(root):
+            os.rename(root, old)
+        os.rename(nxt, root)
+        shutil.rmtree(old, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
+        refresh_paths()
+        addin_msg = install_addin(force=True) if changed_addin else ''
+        parts = []
+        if changed_addin:
+            parts.append('complément Fusion')
+        if changed_web:
+            parts.append('site du casque')
+        if changed_bridge:
+            parts.append('app Fusion3D VR')
+        return {'updated': True, 'version': new_version, 'restart': changed_bridge,
+                'addinChanged': changed_addin, 'webChanged': changed_web,
+                'message': 'Mis à jour vers %s : %s.%s' % (new_version, ', '.join(parts),
+                                                          ' Rechargez la page dans le casque.' if changed_web else ''),
+                'addinMessage': addin_msg}
+    finally:
+        _update_lock.release()
+
+
+def restart_bridge(delay=1.0):
+    """Relance l'app pour charger le nouveau code du pont."""
+    def go():
+        time.sleep(delay)
+        if getattr(sys, 'frozen', False):
+            argv = [sys.executable]
+        else:
+            argv = [sys.executable, os.path.abspath(sys.argv[0])]
+        args = [a for a in sys.argv[1:] if a != '--no-browser'] + ['--no-browser']
+        os.environ.pop('F3DVR_OVERRIDE_RUNNING', None)
+        os.execv(argv[0], argv + args)
+    threading.Thread(target=go, daemon=True).start()
 
 
 # --------------------------------------------------------------------------
@@ -215,7 +429,7 @@ class State:
             now = time.time()
             heads = [ip for ip, t in self.headsets.items() if now - t < 15]
             return {
-                'app': APP_NAME, 'version': VERSION,
+                'app': APP_NAME, 'version': current_version(),
                 'document': self.scene.get('document', ''),
                 'bodies': [b.get('name', '') for b in self.scene.get('bodies', [])],
                 'sceneVersion': self.version,
@@ -276,6 +490,8 @@ class Handler(BaseHTTPRequestHandler):
                 STATE.headsets[self.client_address[0]] = time.time()
         if path == '/api/status':
             return self._json(STATE.summary())
+        if path == '/api/version':
+            return self._json({'version': current_version(), 'appVersion': VERSION})
         if path == '/api/scene':
             with STATE.lock:
                 data = STATE.scene_json
@@ -354,6 +570,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True})
         if path == '/api/install-addin':
             return self._json({'message': install_addin(force=True)})
+        if path == '/api/update':
+            result = update_now()
+            self._json(result)
+            if result.get('restart'):
+                restart_bridge()
+            return
         return self._send(404, b'{"error":"introuvable"}')
 
 
@@ -423,7 +645,9 @@ def run_menubar(install_msg):
                 None,
                 rumps.MenuItem("Ouvrir la page d'état…", callback=self.open_status),
                 rumps.MenuItem('Aperçu 3D sur le Mac…', callback=self.open_preview),
+                rumps.MenuItem('Mettre à jour maintenant', callback=self.update),
                 rumps.MenuItem('Réinstaller le complément Fusion', callback=self.reinstall),
+                rumps.MenuItem('Version %s' % current_version()),
                 None,
                 rumps.MenuItem('Quitter Fusion3D VR', callback=rumps.quit_application),
             ]
@@ -439,6 +663,18 @@ def run_menubar(install_msg):
         def open_preview(self, _):
             webbrowser.open('http://127.0.0.1:%d/' % LOCAL_PORT)
 
+        def update(self, _):
+            result = update_now()
+            msg = result['message']
+            if result.get('addinChanged'):
+                msg += '\n\nDans Fusion, cliquez « Mettre à jour maintenant » (panneau CASQUE VR) ' \
+                       'ou redémarrez Fusion pour charger le nouveau complément.'
+            if result.get('restart'):
+                msg += "\n\nL'app va redémarrer."
+            rumps.alert(APP_NAME, msg)
+            if result.get('restart'):
+                restart_bridge(0.2)
+
         def reinstall(self, _):
             rumps.alert(APP_NAME, install_addin(force=True))
 
@@ -453,8 +689,34 @@ def run_menubar(install_msg):
     App().run()
 
 
+def run_override_if_any():
+    """Si une version plus récente du pont a été téléchargée, l'exécuter à la place."""
+    if os.environ.get('F3DVR_OVERRIDE_RUNNING'):
+        return False
+    root = active_override()
+    src = os.path.join(root, 'fusion3d_bridge.py') if root else None
+    if not src or not os.path.isfile(src):
+        return False
+    if _file_hash(src) == _file_hash(os.path.abspath(__file__)):
+        return False
+    import runpy
+    os.environ['F3DVR_OVERRIDE_RUNNING'] = '1'
+    try:
+        runpy.run_path(src, run_name='__main__')
+    except SystemExit:
+        raise
+    except Exception as e:  # nouvelle version cassée : on revient à la version intégrée
+        print('Version téléchargée en échec (%s), retour à la version intégrée.' % e, file=sys.stderr)
+        os.environ.pop('F3DVR_OVERRIDE_RUNNING', None)
+        return False
+    return True
+
+
 def main():
     global LOCAL_PORT, VR_PORT
+    if run_override_if_any():
+        return
+    refresh_paths()
     ap = argparse.ArgumentParser(description=APP_NAME)
     ap.add_argument('--headless', action='store_true', help='sans icône de barre des menus')
     ap.add_argument('--no-install', action='store_true', help="ne pas installer le complément Fusion")
@@ -498,6 +760,8 @@ def main():
     except KeyboardInterrupt:
         pass
 
+
+refresh_paths()
 
 if __name__ == '__main__':
     mimetypes.add_type('text/javascript', '.js')

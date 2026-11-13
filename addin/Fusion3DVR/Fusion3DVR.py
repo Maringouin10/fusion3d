@@ -12,6 +12,12 @@
 import adsk.core
 import adsk.fusion
 import array
+import importlib
+import io
+import shutil
+import ssl
+import sys
+import zipfile
 import base64
 import json
 import os
@@ -27,6 +33,9 @@ CMD_TOGGLE = 'F3DVR_Toggle'
 CMD_SEND_ALL = 'F3DVR_SendAll'
 CMD_CLEAR = 'F3DVR_Clear'
 CMD_OPEN = 'F3DVR_Open'
+CMD_UPDATE = 'F3DVR_Update'
+RELOAD_EVENT = 'F3DVR_ReloadEvent'
+UPDATE_ZIP_URL = 'https://codeload.github.com/Maringouin10/fusion3d/zip/HEAD'
 PANEL_ID = 'F3DVR_Panel'
 WORKSPACE_ID = 'FusionSolidEnvironment'
 TAB_ID = 'SolidTab'
@@ -288,11 +297,85 @@ def _do_open():
     webbrowser.open(BRIDGE_URL + '/status')
 
 
+def _self_update_from_github():
+    """Secours si l'app Fusion3D VR n'est pas ouverte : met à jour le complément seul."""
+    req = urllib.request.Request(UPDATE_ZIP_URL, headers={'User-Agent': 'Fusion3D-VR-addin'})
+    with urllib.request.urlopen(req, timeout=60, context=ssl.create_default_context()) as r:
+        data = r.read()
+    zf = zipfile.ZipFile(io.BytesIO(data))
+    prefix = zf.namelist()[0].split('/')[0] + '/addin/Fusion3DVR/'
+    files = {i.filename[len(prefix):]: i for i in zf.infolist()
+             if i.filename.startswith(prefix) and not i.is_dir()}
+    if 'Fusion3DVR.py' not in files:
+        raise RuntimeError('complément absent de GitHub')
+    new_code = zf.read(files['Fusion3DVR.py'])
+    compile(new_code, 'Fusion3DVR.py', 'exec')  # refuse une version cassée
+    with open(os.path.join(HERE, 'Fusion3DVR.py'), 'rb') as f:
+        changed = f.read() != new_code
+    for rel, info in files.items():
+        dst = os.path.realpath(os.path.join(HERE, rel))
+        if not dst.startswith(os.path.realpath(HERE) + os.sep):
+            continue
+        if not changed and os.path.exists(dst) and open(dst, 'rb').read() == zf.read(info):
+            continue
+        changed = True
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with zf.open(info) as src, open(dst, 'wb') as out:
+            shutil.copyfileobj(src, out)
+    return changed
+
+
+def _do_update():
+    """« Mettre à jour maintenant » : récupère le dernier code sur GitHub puis recharge le complément."""
+    result = None
+    try:
+        result = _post('/api/update', {}, timeout=120)
+    except Exception:
+        result = None
+    if result is not None:
+        msg = result.get('message', '')
+        addin_changed = bool(result.get('addinChanged'))
+        if result.get('restart'):
+            msg += "\nL'app Fusion3D VR redémarre."
+    else:
+        try:
+            addin_changed = _self_update_from_github()
+            msg = ('Complément mis à jour depuis GitHub.' if addin_changed else 'Complément déjà à jour.') + \
+                  "\n(L'app Fusion3D VR n'est pas ouverte : seul le complément a été vérifié.)"
+        except Exception as e:
+            _ui.messageBox('Mise à jour impossible : %s' % e, 'Fusion3D VR')
+            return
+    if addin_changed:
+        msg += '\n\nLe complément va se recharger.'
+    _ui.messageBox(msg, 'Fusion3D VR')
+    if addin_changed:
+        _app.fireCustomEvent(RELOAD_EVENT, '')
+
+
+class ReloadHandler(adsk.core.CustomEventHandler):
+    """Recharge le complément (nouveau code) sans redémarrer Fusion."""
+
+    def notify(self, args):
+        try:
+            mod = sys.modules.get(__name__)
+            stop(None)
+            if mod is None:
+                raise RuntimeError('module introuvable')
+            importlib.reload(mod)
+            mod.run(None)
+        except Exception:
+            adsk.core.Application.get().userInterface.messageBox(
+                'Mise à jour installée. Redémarrez Fusion (ou Utilitaires › Compléments › '
+                'Fusion3DVR › Arrêter puis Exécuter) pour la charger.\n\n' + traceback.format_exc(),
+                'Fusion3D VR')
+
+
 ACTIONS = {
     CMD_TOGGLE: _do_toggle,
     CMD_SEND_ALL: _do_send_all,
     CMD_CLEAR: _do_clear,
     CMD_OPEN: _do_open,
+    CMD_UPDATE: _do_update,
 }
 
 
@@ -321,8 +404,12 @@ class CreatedHandler(adsk.core.CommandCreatedEventHandler):
                 for i in range(sels.count):
                     _pending_entities.append(sels.item(i).entity)
             cmd = args.command
-            cmd.isAutoExecute = True
-            cmd.isRepeatable = False
+            # sans champ de saisie, la commande s'exécute directement (pas de boîte de dialogue)
+            for attr, val in (('isAutoExecute', True), ('isRepeatable', False)):
+                try:
+                    setattr(cmd, attr, val)
+                except Exception:
+                    pass
             h = ExecuteHandler(self.cmd_id)
             cmd.execute.add(h)
             _handlers.append(h)
@@ -347,9 +434,15 @@ class MarkingMenuHandler(adsk.core.MarkingMenuEventHandler):
             if not relevant:
                 return
             cmd_def = _ui.commandDefinitions.itemById(CMD_TOGGLE)
-            cmd_def.name = 'Retirer du casque VR' if all_on else 'Voir dans le casque VR'
+            try:
+                cmd_def.name = 'Retirer du casque VR' if all_on else 'Voir dans le casque VR'
+            except Exception:
+                pass
             controls = args.linearMarkingMenu.controls
-            controls.addSeparator()
+            try:
+                controls.addSeparator()
+            except Exception:
+                pass
             controls.addCommand(cmd_def)
         except Exception:
             pass
@@ -407,6 +500,20 @@ def run(context):
                                 "Ouvre la page de l'app Fusion3D VR (adresse à taper dans le casque).",
                                 'open')
 
+        update_cmd = _add_command(CMD_UPDATE, 'Mettre à jour maintenant',
+                                  'Télécharge la dernière version de Fusion3D VR depuis GitHub '
+                                  '(complément, app et site du casque) et la charge immédiatement.',
+                                  'update')
+
+        try:
+            _app.unregisterCustomEvent(RELOAD_EVENT)
+        except Exception:
+            pass
+        reload_event = _app.registerCustomEvent(RELOAD_EVENT)
+        rh = ReloadHandler()
+        reload_event.add(rh)
+        _handlers.append(rh)
+
         ws = _ui.workspaces.itemById(WORKSPACE_ID)
         tab = ws.toolbarTabs.itemById(TAB_ID) if ws else None
         if tab:
@@ -420,6 +527,8 @@ def run(context):
             panel.controls.addCommand(send_all)
             panel.controls.addCommand(clear)
             panel.controls.addCommand(open_cmd)
+            panel.controls.addSeparator()
+            panel.controls.addCommand(update_cmd)
 
         for event, h in ((_ui.markingMenuDisplaying, MarkingMenuHandler()),
                          (_app.commandTerminated, CommandTerminatedHandler()),
@@ -449,6 +558,10 @@ def stop(context):
             except Exception:
                 pass
         _app_events.clear()
+        try:
+            _app.unregisterCustomEvent(RELOAD_EVENT)
+        except Exception:
+            pass
         _handlers.clear()
     except Exception:
         if _ui:
