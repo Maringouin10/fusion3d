@@ -476,7 +476,13 @@ def _add_command(cmd_id, name, tooltip, icon):
     existing = defs.itemById(cmd_id)
     if existing:
         existing.deleteMe()
-    cmd_def = defs.addButtonDefinition(cmd_id, name, tooltip, os.path.join(RES, icon))
+    folder = os.path.join(RES, icon)
+    if not os.path.isfile(os.path.join(folder, '16x16.png')):
+        folder = ''  # icône absente (fichiers incomplets) : bouton sans icône plutôt qu'un plantage
+    try:
+        cmd_def = defs.addButtonDefinition(cmd_id, name, tooltip, folder)
+    except Exception:
+        cmd_def = defs.addButtonDefinition(cmd_id, name, tooltip)
     h = CreatedHandler(cmd_id)
     cmd_def.commandCreated.add(h)
     _handlers.append(h)
