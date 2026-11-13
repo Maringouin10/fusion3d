@@ -365,6 +365,15 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
+    def server_bind(self):
+        # HTTPServer.server_bind() appelle socket.getfqdn(), qui peut bloquer
+        # plusieurs minutes sur macOS (résolution DNS du nom de la machine).
+        import socketserver
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
 
 class TLSServer(Server):
     """HTTPS : la poignée de main TLS est faite dans le thread de chaque requête."""
