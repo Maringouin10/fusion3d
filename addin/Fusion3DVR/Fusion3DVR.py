@@ -509,10 +509,13 @@ def run(context):
             _app.unregisterCustomEvent(RELOAD_EVENT)
         except Exception:
             pass
-        reload_event = _app.registerCustomEvent(RELOAD_EVENT)
-        rh = ReloadHandler()
-        reload_event.add(rh)
-        _handlers.append(rh)
+        try:
+            reload_event = _app.registerCustomEvent(RELOAD_EVENT)
+            rh = ReloadHandler()
+            reload_event.add(rh)
+            _handlers.append(rh)
+        except Exception:
+            pass  # sans rechargement auto, la mise à jour demandera de redémarrer le complément
 
         ws = _ui.workspaces.itemById(WORKSPACE_ID)
         tab = ws.toolbarTabs.itemById(TAB_ID) if ws else None
@@ -530,12 +533,23 @@ def run(context):
             panel.controls.addSeparator()
             panel.controls.addCommand(update_cmd)
 
-        for event, h in ((_ui.markingMenuDisplaying, MarkingMenuHandler()),
-                         (_app.commandTerminated, CommandTerminatedHandler()),
-                         (_app.documentActivated, DocumentActivatedHandler())):
-            event.add(h)
-            _handlers.append(h)
-            _app_events.append((event, h))
+        # Chaque événement est branché séparément : si l'un échoue, le reste fonctionne.
+        # (commandTerminated et markingMenuDisplaying sont sur UserInterface,
+        #  documentActivated sur Application.)
+        failed = []
+        for owner, name, h in ((_ui, 'markingMenuDisplaying', MarkingMenuHandler()),
+                               (_ui, 'commandTerminated', CommandTerminatedHandler()),
+                               (_app, 'documentActivated', DocumentActivatedHandler())):
+            try:
+                event = getattr(owner, name)
+                event.add(h)
+                _handlers.append(h)
+                _app_events.append((event, h))
+            except Exception:
+                failed.append(name)
+        if 'markingMenuDisplaying' in failed:
+            _ui.messageBox("Fusion3D VR : le clic droit n'a pas pu être ajouté. "
+                           'Utilisez le panneau CASQUE VR de l\'onglet SOLIDE.', 'Fusion3D VR')
     except Exception:
         if _ui:
             _ui.messageBox('Fusion3D VR - échec du démarrage :\n' + traceback.format_exc())

@@ -25,8 +25,8 @@ app = BUNDLE(
     info_plist={
         'CFBundleName': 'Fusion3D VR',
         'CFBundleDisplayName': 'Fusion3D VR',
-        'CFBundleShortVersionString': '1.1.0',
-        'CFBundleVersion': '1.1.0',
+        'CFBundleShortVersionString': '1.1.1',
+        'CFBundleVersion': '1.1.1',
         'LSUIElement': True,               # icône dans la barre des menus, pas dans le Dock
         'LSMinimumSystemVersion': '11.0',
         'NSLocalNetworkUsageDescription':
