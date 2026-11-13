@@ -64,24 +64,40 @@ def data_dir():
     return d
 
 
+_ips_cache = {'t': 0, 'ips': []}
+
+
 def local_ips():
+    """Adresses IPv4 du Mac sur le réseau local (mises en cache 10 s).
+
+    Pas de résolution DNS du nom d'hôte : sur macOS elle peut bloquer longtemps."""
+    now = time.time()
+    if now - _ips_cache['t'] < 10:
+        return list(_ips_cache['ips'])
     ips = set()
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('10.255.255.255', 1))
-        ips.add(s.getsockname()[0])
-        s.close()
-    except OSError:
-        pass
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
-    except OSError:
-        pass
-    ips = [ip for ip in ips if not ip.startswith('127.')]
+    for probe in ('10.255.255.255', '192.168.255.255', '172.31.255.255'):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(0.2)
+            s.connect((probe, 1))  # UDP : n'envoie rien, choisit seulement l'interface
+            ips.add(s.getsockname()[0])
+            s.close()
+        except OSError:
+            pass
+    if sys.platform == 'darwin':
+        for iface in ('en0', 'en1', 'en2'):
+            try:
+                out = subprocess.run(['ipconfig', 'getifaddr', iface], capture_output=True,
+                                     text=True, timeout=1).stdout.strip()
+                if out:
+                    ips.add(out)
+            except (OSError, subprocess.SubprocessError):
+                pass
+    ips = [ip for ip in ips if not ip.startswith(('127.', '0.'))]
     # adresses privées en premier
     ips.sort(key=lambda ip: (not ipaddress.ip_address(ip).is_private, ip))
-    return ips
+    _ips_cache.update(t=now, ips=ips)
+    return list(ips)
 
 
 # --------------------------------------------------------------------------
@@ -219,6 +235,19 @@ STATE = State()
 class Handler(BaseHTTPRequestHandler):
     server_version = 'Fusion3DVR/' + VERSION
     is_local = False  # surchargé pour le serveur 127.0.0.1
+    timeout = 30      # une connexion muette ne bloque pas un thread indéfiniment
+
+    def setup(self):
+        super().setup()
+        # poignée de main TLS dans le thread de la requête, pas dans celui qui accepte
+        if isinstance(self.connection, ssl.SSLSocket):
+            self.connection.do_handshake()
+
+    def handle(self):
+        try:
+            super().handle()
+        except (ssl.SSLError, ConnectionError, TimeoutError, OSError):
+            pass
 
     def log_message(self, fmt, *args):
         pass
@@ -337,13 +366,27 @@ class Server(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+class TLSServer(Server):
+    """HTTPS : la poignée de main TLS est faite dans le thread de chaque requête."""
+
+    def __init__(self, addr, handler, ctx):
+        self.ctx = ctx
+        super().__init__(addr, handler)
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        return self.ctx.wrap_socket(sock, server_side=True, do_handshake_on_connect=False), addr
+
+    def handle_error(self, request, client_address):
+        pass  # certificat refusé par le navigateur, connexion coupée… : normal
+
+
 def start_servers(local_port=LOCAL_PORT, vr_port=VR_PORT):
     local = Server(('127.0.0.1', local_port), LocalHandler)
     cert, key = ensure_certificate()
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(cert, key)
-    vr = Server(('0.0.0.0', vr_port), Handler)
-    vr.socket = ctx.wrap_socket(vr.socket, server_side=True)
+    vr = TLSServer(('0.0.0.0', vr_port), Handler, ctx)
     for srv in (local, vr):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
     return local, vr

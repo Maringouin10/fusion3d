@@ -15,16 +15,18 @@ jobs:
           - runner: macos-15        # Apple Silicon (M1/M2/M3/M4)
           - runner: macos-15-intel  # Mac Intel
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Tests du pont
+        timeout-minutes: 5
         run: |
           pip install -r bridge/requirements.txt
           python -m py_compile addin/Fusion3DVR/Fusion3DVR.py bridge/fusion3d_bridge.py
-          python tests/test_bridge.py
+          python -u tests/test_bridge.py
       - name: Construire le .dmg
         run: ./packaging/build_dmg.sh
       - uses: actions/upload-artifact@v4

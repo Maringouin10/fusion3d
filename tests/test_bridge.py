@@ -1,6 +1,7 @@
 """Test de bout en bout du pont : envoi d'un corps (comme le complément Fusion),
 lecture HTTPS (comme le casque), notification temps réel (SSE)."""
 import array
+import faulthandler
 import base64
 import json
 import os
@@ -11,6 +12,7 @@ import threading
 import urllib.error
 import urllib.request
 
+faulthandler.dump_traceback_later(90, exit=True)  # en CI : montre où ça bloque
 os.environ['HOME'] = tempfile.mkdtemp()
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'bridge'))
 import fusion3d_bridge as fb  # noqa: E402
@@ -79,4 +81,5 @@ except urllib.error.HTTPError as e:
 
 status = json.load(urllib.request.urlopen('http://127.0.0.1:%d/api/status' % LP))
 assert status['bodies'] == ['Body1']
-print('OK - tous les tests du pont passent')
+print('OK - tous les tests du pont passent', flush=True)
+os._exit(0)
