@@ -9,9 +9,14 @@ Voir et manipuler ses modèles **Fusion 360** dans un casque **Meta Quest 3 / 3S
 └──────────────┘                  └─────────────────────┘                  └──────────────┘
 ```
 
-1. **Complément Fusion** (`addin/Fusion3DVR`) : ajoute **« Voir dans le casque VR »** au
-   clic droit sur un corps ou un composant dans l'arbre (et dans la vue 3D), plus un panneau
-   **CASQUE VR** dans l'onglet SOLIDE (« Tout envoyer », « Vider le casque », « Connexion du casque… »).
+1. **Complément Fusion** (`addin/Fusion3DVR`) : au clic droit sur un ou plusieurs corps, un
+   dossier de corps ou un composant (dans l'arbre ou la vue 3D) :
+   - **Ajouter à la VR** : ajoute la sélection à ce qui est déjà dans le casque ;
+   - **Voir seul en VR** : le casque montre uniquement la sélection ;
+   - **Retirer de la VR**.
+
+   Les mêmes boutons sont dans le panneau **CASQUE VR** de l'onglet SOLIDE, avec « Tout envoyer »,
+   « Vider le casque », « Connexion du casque… » et « Mettre à jour maintenant ».
    Les corps marqués sont renvoyés automatiquement après chaque modification : synchro en direct.
 2. **App Mac « Fusion3D VR »** (`bridge/`) : distribuée en `.dmg`. Icône dans la barre des menus,
    installe le complément dans Fusion, et sert le site WebXR au casque en HTTPS (certificat local
@@ -25,7 +30,8 @@ Voir et manipuler ses modèles **Fusion 360** dans un casque **Meta Quest 3 / 3S
    première fois (app non signée par Apple).
 2. Dans Fusion : **Utilitaires › Compléments** (`Maj+S`) › **Fusion3DVR** › **Exécuter**
    (une seule fois ; ensuite il démarre avec Fusion).
-3. Clic droit sur **Body1** dans l'arbre › **Voir dans le casque VR**.
+3. Clic droit sur **Body1** dans l'arbre › **Ajouter à la VR** (ou **Voir seul en VR**).
+   Cmd+clic pour sélectionner plusieurs corps ; clic droit sur un dossier ou un composant pour tout son contenu.
 4. Dans le casque (même Wi-Fi que le Mac) : navigateur › adresse affichée par l'app
    (ex. `https://192.168.1.23:8443`) › *Paramètres avancés › Continuer* › **Entrer en VR**.
 
@@ -68,8 +74,8 @@ bibliothèques Python ne peuvent pas arriver par ce chemin : il faut alors un no
 
 L'API de Fusion 360 ne permet **pas** d'ajouter une icône directement dans les lignes de l'arbre
 (à côté de l'œil de visibilité) : cette zone n'est pas personnalisable par les compléments.
-L'équivalent le plus proche, utilisé ici, est l'entrée **« Voir dans le casque VR » / « Retirer du
-casque VR »** au **clic droit sur le corps dans l'arbre**, plus le bouton du panneau CASQUE VR.
+L'équivalent le plus proche, utilisé ici, est le **clic droit sur le corps dans l'arbre**
+(« Ajouter à la VR », « Voir seul en VR », « Retirer de la VR »), plus le panneau CASQUE VR.
 
 ## Construire le .dmg
 

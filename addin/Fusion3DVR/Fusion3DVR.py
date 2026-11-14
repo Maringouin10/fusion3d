@@ -29,7 +29,10 @@ BRIDGE_URL = 'http://127.0.0.1:8765'
 ATTR_GROUP = 'Fusion3DVR'
 ATTR_NAME = 'visible'
 
-CMD_TOGGLE = 'F3DVR_Toggle'
+CMD_ADD = 'F3DVR_Add'        # ajoute à ce qui est déjà dans le casque
+CMD_SOLO = 'F3DVR_Solo'      # montre uniquement la sélection
+CMD_REMOVE = 'F3DVR_Remove'  # retire la sélection du casque
+SELECTION_CMDS = (CMD_ADD, CMD_SOLO, CMD_REMOVE)
 CMD_SEND_ALL = 'F3DVR_SendAll'
 CMD_CLEAR = 'F3DVR_Clear'
 CMD_OPEN = 'F3DVR_Open'
@@ -93,6 +96,10 @@ def _bodies_of_component(comp):
 
 
 def _bodies_from_entity(entity):
+    """Corps contenus dans l'élément sélectionné : corps, composant, occurrence,
+    dossier « Corps » ou dossier de corps, ou toute collection de corps."""
+    if entity is None:
+        return []
     body = adsk.fusion.BRepBody.cast(entity)
     if body:
         return [body]
@@ -102,7 +109,47 @@ def _bodies_from_entity(entity):
     comp = adsk.fusion.Component.cast(entity)
     if comp:
         return _bodies_of_component(comp)
+    # dossier de corps / collection : tout objet qui expose des corps
+    for attr in ('bRepBodies', 'bodies'):
+        try:
+            coll = getattr(entity, attr)
+        except Exception:
+            continue
+        if coll is not None:
+            return _bodies_from_collection(coll)
+    try:
+        if hasattr(entity, 'count') and hasattr(entity, 'item'):
+            return _bodies_from_collection(entity)
+    except Exception:
+        pass
     return []
+
+
+def _bodies_from_collection(coll):
+    out = []
+    try:
+        for i in range(coll.count):
+            out.extend(_bodies_from_entity(coll.item(i)))
+    except Exception:
+        pass
+    return out
+
+
+def _unique(bodies):
+    seen, out = set(), []
+    for b in bodies:
+        key = _native(b).entityToken
+        if key not in seen:
+            seen.add(key)
+            out.append(b)
+    return out
+
+
+def _selected_bodies(entities):
+    bodies = []
+    for e in entities:
+        bodies.extend(_bodies_from_entity(e))
+    return _unique(bodies)
 
 
 def _all_body_instances(design):
@@ -251,23 +298,57 @@ def _flagged_count():
 # Commandes
 # --------------------------------------------------------------------------
 
-def _do_toggle():
+def _take_selection():
     entities = list(_pending_entities)
     _pending_entities.clear()
-    bodies = []
-    for e in entities:
-        bodies.extend(_bodies_from_entity(e))
+    bodies = _selected_bodies(entities)
     if not bodies:
-        _ui.messageBox("Sélectionnez un corps ou un composant (dans l'arbre ou la vue), "
-                       "puis cliquez sur « Voir dans le casque VR ».", 'Fusion3D VR')
-        return
-    turn_on = not all(_is_flagged(b) for b in bodies)
-    for b in bodies:
-        _set_flag(b, turn_on)
-    if turn_on and not _bridge_alive():
+        _ui.messageBox("Sélectionnez un ou plusieurs corps, un dossier de corps ou un composant "
+                       "(dans l'arbre ou la vue), puis faites clic droit.", 'Fusion3D VR')
+    return bodies
+
+
+def _send_after_change(adding):
+    if adding and not _bridge_alive():
         _warn_bridge()
         return
-    push_scene()
+    push_scene(silent=not adding)
+
+
+def _do_add():
+    """Ajouter à la VR : la sélection rejoint ce qui est déjà dans le casque."""
+    bodies = _take_selection()
+    if not bodies:
+        return
+    for b in bodies:
+        _set_flag(b, True)
+    _send_after_change(True)
+
+
+def _do_solo():
+    """Voir seul en VR : le casque montre uniquement la sélection."""
+    bodies = _take_selection()
+    if not bodies:
+        return
+    design = _design()
+    keep = {_native(b).entityToken for b in bodies}
+    if design:
+        for body, _, _ in _all_body_instances(design):
+            if _native(body).entityToken not in keep:
+                _set_flag(body, False)
+    for b in bodies:
+        _set_flag(b, True)
+    _send_after_change(True)
+
+
+def _do_remove():
+    """Retirer de la VR."""
+    bodies = _take_selection()
+    if not bodies:
+        return
+    for b in bodies:
+        _set_flag(b, False)
+    _send_after_change(False)
 
 
 def _do_send_all():
@@ -371,7 +452,9 @@ class ReloadHandler(adsk.core.CustomEventHandler):
 
 
 ACTIONS = {
-    CMD_TOGGLE: _do_toggle,
+    CMD_ADD: _do_add,
+    CMD_SOLO: _do_solo,
+    CMD_REMOVE: _do_remove,
     CMD_SEND_ALL: _do_send_all,
     CMD_CLEAR: _do_clear,
     CMD_OPEN: _do_open,
@@ -398,7 +481,7 @@ class CreatedHandler(adsk.core.CommandCreatedEventHandler):
 
     def notify(self, args):
         try:
-            if self.cmd_id == CMD_TOGGLE:
+            if self.cmd_id in SELECTION_CMDS:
                 _pending_entities.clear()
                 sels = _ui.activeSelections
                 for i in range(sels.count):
@@ -418,32 +501,32 @@ class CreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 
 class MarkingMenuHandler(adsk.core.MarkingMenuEventHandler):
-    """Ajoute « Voir dans le casque VR » au clic droit sur un corps / composant."""
+    """Clic droit sur un corps, un dossier de corps ou un composant :
+    « Ajouter à la VR », « Voir seul en VR », « Retirer de la VR »."""
 
     def notify(self, args):
         try:
             sels = _ui.activeSelections
-            relevant = False
-            all_on = True
-            for i in range(sels.count):
-                bodies = _bodies_from_entity(sels.item(i).entity)
-                if bodies:
-                    relevant = True
-                    if not all(_is_flagged(b) for b in bodies):
-                        all_on = False
-            if not relevant:
+            entities = [sels.item(i).entity for i in range(sels.count)]
+            bodies = _selected_bodies(entities)
+            if not bodies:
                 return
-            cmd_def = _ui.commandDefinitions.itemById(CMD_TOGGLE)
-            try:
-                cmd_def.name = 'Retirer du casque VR' if all_on else 'Voir dans le casque VR'
-            except Exception:
-                pass
+            n_on = sum(1 for b in bodies if _is_flagged(b))
             controls = args.linearMarkingMenu.controls
             try:
                 controls.addSeparator()
             except Exception:
                 pass
-            controls.addCommand(cmd_def)
+            ids = []
+            if n_on < len(bodies):
+                ids.append(CMD_ADD)
+            ids.append(CMD_SOLO)
+            if n_on > 0:
+                ids.append(CMD_REMOVE)
+            for cid in ids:
+                d = _ui.commandDefinitions.itemById(cid)
+                if d:
+                    controls.addCommand(d)
         except Exception:
             pass
 
@@ -495,9 +578,16 @@ def run(context):
         _app = adsk.core.Application.get()
         _ui = _app.userInterface
 
-        toggle = _add_command(CMD_TOGGLE, 'Voir dans le casque VR',
-                              'Affiche / retire le corps ou composant sélectionné dans le casque Meta Quest.',
-                              'toggle')
+        old = _ui.commandDefinitions.itemById('F3DVR_Toggle')  # bouton des versions précédentes
+        if old:
+            old.deleteMe()
+        add_cmd = _add_command(CMD_ADD, 'Ajouter à la VR',
+                               'Ajoute les corps sélectionnés (ou un dossier / composant entier) à ce qui '
+                               'est déjà affiché dans le casque.', 'add')
+        solo_cmd = _add_command(CMD_SOLO, 'Voir seul en VR',
+                                'Le casque affiche uniquement la sélection (le reste est retiré).', 'solo')
+        remove_cmd = _add_command(CMD_REMOVE, 'Retirer de la VR',
+                                  'Retire les corps sélectionnés du casque.', 'remove')
         send_all = _add_command(CMD_SEND_ALL, 'Tout envoyer au casque',
                                 'Envoie tous les corps du design au casque VR.', 'sendall')
         clear = _add_command(CMD_CLEAR, 'Vider le casque',
@@ -530,9 +620,15 @@ def run(context):
             if panel:
                 panel.deleteMe()
             panel = tab.toolbarPanels.add(PANEL_ID, 'CASQUE VR')
-            c = panel.controls.addCommand(toggle)
-            c.isPromoted = True
-            c.isPromotedByDefault = True
+            for i, d in enumerate((add_cmd, solo_cmd, remove_cmd)):
+                c = panel.controls.addCommand(d)
+                if i < 2:  # « Ajouter » et « Voir seul » directement visibles dans le ruban
+                    try:
+                        c.isPromoted = True
+                        c.isPromotedByDefault = True
+                    except Exception:
+                        pass
+            panel.controls.addSeparator()
             panel.controls.addCommand(send_all)
             panel.controls.addCommand(clear)
             panel.controls.addCommand(open_cmd)

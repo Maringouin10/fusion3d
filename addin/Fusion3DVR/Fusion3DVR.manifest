@@ -6,7 +6,7 @@
   "description": {
     "": "Affiche les corps Fusion dans un casque Meta Quest (WebXR) via l'app Fusion3D VR."
   },
-  "version": "1.2.0",
+  "version": "1.3.0",
   "runOnStartup": true,
   "supportedOS": "mac|windows",
   "editEnabled": true

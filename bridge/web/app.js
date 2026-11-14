@@ -126,7 +126,13 @@ function applyScene(data) {
   }
   // Fusion « Z vers le haut » -> Y vers le haut
   fitter.rotation.set(data.upAxis === 'Z' ? -Math.PI / 2 : 0, 0, 0);
-  if (docChanged || fitter.userData.empty) {
+  // autre document, ou autres pièces (« Voir seul en VR », ajout, retrait) : on recentre
+  const idsKey = (data.bodies || []).map((b) => b.id).sort().join('|');
+  const bodiesChanged = idsKey !== fitter.userData.idsKey;
+  fitter.userData.idsKey = idsKey;
+  if (bodiesChanged && !docChanged && !fitter.userData.empty) {
+    computeFit();
+  } else if (docChanged || fitter.userData.empty) {
     computeFit();
     const sz = modelSizeCm();
     if (sz) { realScale = Math.max(sz.x, sz.y, sz.z) * 0.01 <= MAX_REAL; applyScale(); }
@@ -237,8 +243,8 @@ function updateUI() {
   const bodies = sceneData?.bodies || [];
   $('doc').textContent = bodies.length
     ? `${sceneData.document || 'Design'} — ${bodies.length} corps — ${dimsText()}`
-    : (sceneData?.document ? `${sceneData.document} — aucun corps envoyé. Clic droit sur un corps dans Fusion → « Voir dans le casque VR ».`
-      : 'En attente de Fusion… Clic droit sur un corps → « Voir dans le casque VR ».');
+    : (sceneData?.document ? `${sceneData.document} — aucun corps envoyé. Clic droit sur un corps dans Fusion → « Ajouter à la VR ».`
+      : 'En attente de Fusion… Clic droit sur un corps → « Ajouter à la VR ».');
   const ul = $('bodies');
   ul.innerHTML = '';
   for (const b of bodies) {
@@ -506,7 +512,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-window.fusion3d = { palm }; // pour le débogage dans la console
+window.fusion3d = { palm, fitter, meshes, THREE }; // pour le débogage dans la console
 setupXRButtons();
 connect();
 refresh();
