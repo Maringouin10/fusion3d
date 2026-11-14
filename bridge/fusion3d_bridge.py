@@ -34,7 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 APP_NAME = 'Fusion3D VR'
-VERSION = '1.3.0'
+VERSION = '1.4.0'
 # Mises à jour : archive de la branche par défaut du dépôt GitHub
 UPDATE_ZIP_URL = 'https://codeload.github.com/Maringouin10/fusion3d/zip/HEAD'
 LOCAL_PORT = 8765

@@ -39,10 +39,12 @@ Voir et manipuler ses modèles **Fusion 360** dans un casque **Meta Quest 3 / 3S
 
 | Action | Manette | Mains nues |
 |---|---|---|
-| Saisir / déplacer une pièce seule | gâchette sur la pièce | pincer la pièce |
-| Saisir / tourner tout le modèle | poignée (grip), ou gâchette dans le vide | pincer dans le vide |
-| Agrandir / réduire | les deux poignées, écarter les mains | — |
-| Tourner / zoomer | joystick droit ← → / ↑ ↓ | — |
+| Saisir / déplacer **une seule pièce** | gâchette ou poignée, sur la pièce ou près d'elle | pincer sur ou près de la pièce |
+| Agrandir / réduire cette pièce | deuxième main sur la pièce tenue, écarter les mains | idem en pinçant |
+| Tourner / zoomer tout le modèle | joystick droit ← → / ↑ ↓, ou panneau de la paume | panneau de la paume |
+
+On ne saisit jamais tout le modèle d'un coup : la main prend la pièce visée, ou à défaut la plus
+proche (à moins de 25 cm). S'il n'y a rien à portée, rien ne bouge.
 | Réinitialiser | A (ou Y) | — |
 | Taille réelle ↔ taille ajustée | B (ou X) | — |
 | Panneau de commande | flotte au-dessus de la manette gauche : viser + gâchette | tourner la **paume gauche** vers soi, toucher avec l'index droit |

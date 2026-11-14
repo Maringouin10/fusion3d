@@ -115,7 +115,7 @@ function applyScene(data) {
   if (docChanged) { movedBodies.clear(); hidden.clear(); }
 
   // une pièce tenue en main reste en main : on mémorise
-  for (const c of controllers) if (c.userData.grabbed && c.userData.grabbed !== modelRoot) release(c);
+  for (const c of controllers) release(c);
   clearBodies();
   for (const b of data.bodies || []) {
     try {
@@ -362,30 +362,61 @@ function intersect(c) {
   return raycaster.intersectObjects(targets, false)[0] || null;
 }
 
-let twoHand = null; // { d0, s0 }
+let twoHand = null; // { obj, d0, s0 } : deux mains sur la même pièce -> taille
+const GRAB_REACH = 0.25; // une pièce à moins de 25 cm de la main peut être saisie sans la viser
+
+/** La pièce à saisir : celle visée par le rayon, sinon la plus proche de la main. Jamais tout le modèle. */
+function pickBody(c) {
+  const hit = intersect(c);
+  if (hit) return hit.object;
+  const hand = c.getWorldPosition(new THREE.Vector3());
+  let best = null, bestD = GRAB_REACH;
+  const sphere = new THREE.Sphere();
+  for (const m of meshes.values()) {
+    if (!m.visible) continue;
+    sphere.copy(m.geometry.boundingSphere).applyMatrix4(m.matrixWorld);
+    const d = Math.max(0, hand.distanceTo(sphere.center) - sphere.radius);
+    if (d < bestD) { bestD = d; best = m; }
+  }
+  return best;
+}
 
 function grab(c, mode) {
-  if (c.userData.grabbed) return;
+  if (c.userData.grabbed || c.userData.scaling) return;
   if (mode === 'select') {
     const p = panelAim(c);
     if (p?.id) { c.userData.panelPress = true; palm.press(p.id); pulse(c, 0.5, 40); return; }
   }
   const other = controllers.find((o) => o !== c);
-  // deuxième main sur le modèle déjà tenu -> mise à l'échelle
-  if (other.userData.grabbed === modelRoot) {
+  const held = other.userData.grabbed;
+  const target = pickBody(c);
+  // deuxième main sur la pièce déjà tenue (ou dans le vide) -> agrandir / réduire cette pièce
+  if (held && (target === held || !target)) {
     c.userData.grabMode = mode;
     c.userData.scaling = true;
-    twoHand = { d0: c.position.distanceTo(other.position) || 0.01, s0: modelRoot.scale.x };
+    twoHand = { obj: held, d0: c.position.distanceTo(other.position) || 0.01, s0: held.scale.x };
+    pulse(c, 0.3, 30);
     return;
   }
-  const hit = mode === 'select' ? intersect(c) : null;
-  const target = hit && hit.object !== other.userData.grabbed ? hit.object : modelRoot;
-  if (target === modelRoot && other.userData.grabbed && other.userData.grabbed !== modelRoot) return;
+  if (!target) return; // rien à portée : on ne bouge rien
   c.attach(target);
   c.userData.grabbed = target;
   c.userData.grabMode = mode;
   setHighlight(target, true);
   pulse(c, 0.4, 40);
+}
+
+/** Deux mains sur la même pièce : elle grandit / rétrécit autour de son centre. */
+function applyTwoHand() {
+  const d = controllers[0].position.distanceTo(controllers[1].position);
+  const o = twoHand.obj, parent = o.parent;
+  const center = o.geometry.boundingSphere.center;
+  const before = parent.worldToLocal(o.localToWorld(center.clone()));
+  // on limite le rapport (×0,1 à ×20), pas l'échelle brute : une pièce vaut déjà 0,01 (cm -> m)
+  o.scale.setScalar(twoHand.s0 * THREE.MathUtils.clamp(d / twoHand.d0, 0.1, 20));
+  o.updateMatrixWorld(true);
+  const after = parent.worldToLocal(o.localToWorld(center.clone()));
+  o.position.add(before.sub(after));
 }
 
 function release(c) {
@@ -399,22 +430,19 @@ function release(c) {
   if (!obj) return;
   c.userData.grabbed = null;
   c.userData.grabMode = null;
-  setHighlight(obj, false);
   const other = controllers.find((o) => o !== c);
-  if (obj === modelRoot) {
-    if (other.userData.scaling) {
-      // l'autre main reprend le modèle
-      other.userData.scaling = false;
-      twoHand = null;
-      other.attach(modelRoot);
-      other.userData.grabbed = modelRoot;
-    } else {
-      scene.attach(modelRoot);
-    }
-  } else {
-    fitter.attach(obj);
-    movedBodies.set(obj.userData.id, obj.matrix.clone());
+  if (other.userData.scaling && twoHand?.obj === obj) {
+    // l'autre main reprend la pièce
+    other.userData.scaling = false;
+    twoHand = null;
+    other.attach(obj);
+    other.userData.grabbed = obj;
+    other.userData.grabMode = other.userData.squeezing ? 'squeeze' : 'select';
+    return;
   }
+  setHighlight(obj, false);
+  fitter.attach(obj);
+  movedBodies.set(obj.userData.id, obj.matrix.clone());
 }
 
 function setHighlight(obj, on) {
@@ -474,10 +502,7 @@ renderer.setAnimationLoop((t) => {
   const dt = Math.min(timer.getDelta(), 0.1);
   if (renderer.xr.isPresenting) {
     pollGamepads(dt);
-    if (twoHand) {
-      const d = controllers[0].position.distanceTo(controllers[1].position);
-      modelRoot.scale.setScalar(THREE.MathUtils.clamp(twoHand.s0 * d / twoHand.d0, 0.02, 50));
-    }
+    if (twoHand) applyTwoHand();
     palm.update(renderer.xr.getCamera(), environment.visible); // en réalité mixte, on voit ses vraies mains
     let panelHover = null;
     for (const c of controllers) {
@@ -503,7 +528,7 @@ renderer.setAnimationLoop((t) => {
 });
 
 function isGrabbed(obj) {
-  return controllers.some((c) => c.userData.grabbed === obj || c.userData.grabbed === modelRoot);
+  return controllers.some((c) => c.userData.grabbed === obj);
 }
 
 addEventListener('resize', () => {
@@ -512,7 +537,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-window.fusion3d = { palm, fitter, meshes, THREE }; // pour le débogage dans la console
+window.fusion3d = { palm, fitter, meshes, THREE, controllers, grab, release, applyTwoHand }; // pour le débogage dans la console
 setupXRButtons();
 connect();
 refresh();
