@@ -50,12 +50,6 @@ scene.add(modelRoot);
 const fitter = new THREE.Group();
 modelRoot.add(fitter);
 
-// ombre de contact simple
-const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 48).rotateX(-Math.PI / 2),
-  new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false }));
-shadow.position.y = 0.001;
-modelRoot.add(shadow);
-
 // ---------------------------------------------------------------- état
 let sceneData = null;
 let sceneVersion = -1;
@@ -170,8 +164,6 @@ function applyScale() {
   fitter.scale.setScalar(s);
   // pied du modèle posé sur l'origine de modelRoot, centré en X/Z
   fitter.position.set(-c.x * s, -box.min.y * s, -c.z * s);
-  const size = box.getSize(new THREE.Vector3()).multiplyScalar(s);
-  shadow.scale.setScalar(Math.max(0.05, Math.hypot(size.x, size.z) * 0.6) / 0.5);
   $('btn-scale').textContent = realScale ? 'Taille ajustée' : 'Taille réelle';
   palm?.redraw();
 }
