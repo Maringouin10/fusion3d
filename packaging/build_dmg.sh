@@ -32,5 +32,13 @@ cp packaging/LISEZMOI.txt "$STAGE/LISEZMOI.txt"
 ARCH=$(uname -m)
 DMG="dist/Fusion3D-VR-${ARCH}.dmg"
 rm -f "$DMG"
-hdiutil create -volname "Fusion3D VR" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+# hdiutil échoue parfois au hasard (« Resource busy ») : on réessaie
+for i in 1 2 3 4 5; do
+  if hdiutil create -volname "Fusion3D VR" -srcfolder "$STAGE" -ov -format UDZO "$DMG"; then
+    break
+  fi
+  if [ "$i" = 5 ]; then echo "hdiutil a échoué 5 fois" >&2; exit 1; fi
+  echo "hdiutil occupé, nouvel essai dans $((i * 5)) s…"
+  sleep $((i * 5))
+done
 echo "OK -> $DMG"
