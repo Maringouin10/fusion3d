@@ -1,7 +1,8 @@
 # Fusion3D VR - complément Fusion 360
 #
-# Ajoute un bouton « Voir dans le casque VR » :
-#   * clic droit sur un corps / composant dans l'arbre (navigateur) ou dans la vue 3D
+# Ajoute « Ajouter à la VR », « Voir seul en VR » et « Retirer de la VR » :
+#   * clic droit sur un ou plusieurs corps, un dossier de corps ou un composant,
+#     dans l'arbre (navigateur) ou dans la vue 3D
 #   * panneau « CASQUE VR » de l'onglet SOLIDE
 #
 # Les corps marqués sont maillés puis envoyés à l'app « Fusion3D VR » (le pont)
