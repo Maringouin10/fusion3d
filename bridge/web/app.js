@@ -1,8 +1,10 @@
 // Fusion3D VR - visionneuse WebXR (Meta Quest 3 / 3S) des corps envoyés par Fusion 360.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PalmPanel } from './palm.js';
 
-const FIT_SIZE = 0.5;              // en mode « ajusté », plus grande dimension = 50 cm
+const FIT_SIZE = 0.4;              // en mode « ajusté », plus grande dimension = 40 cm
+const MAX_REAL = 2.5;              // au-delà de 2,5 m, on démarre en taille ajustée
 const HOME = new THREE.Vector3(0, 1.0, -0.6); // devant l'utilisateur, hauteur de table
 
 // ---------------------------------------------------------------- scène
@@ -58,7 +60,7 @@ modelRoot.add(shadow);
 let sceneData = null;
 let sceneVersion = -1;
 let currentDoc = null;
-let realScale = false;
+let realScale = true;               // taille réelle (1:1) par défaut
 let fitScale = 1;
 const meshes = new Map();       // id -> mesh
 const movedBodies = new Map();  // id -> Matrix4 (position locale choisie dans le casque)
@@ -130,10 +132,14 @@ function applyScene(data) {
   }
   // Fusion « Z vers le haut » -> Y vers le haut
   fitter.rotation.set(data.upAxis === 'Z' ? -Math.PI / 2 : 0, 0, 0);
-  if (docChanged || fitter.userData.empty) computeFit();
+  if (docChanged || fitter.userData.empty) {
+    computeFit();
+    const sz = modelSizeCm();
+    if (sz) { realScale = Math.max(sz.x, sz.y, sz.z) * 0.01 <= MAX_REAL; applyScale(); }
+  }
   fitter.userData.empty = meshes.size === 0;
   updateUI();
-  updateHud();
+  palm?.redraw();
 }
 
 function computeFit() {
@@ -167,6 +173,27 @@ function applyScale() {
   const size = box.getSize(new THREE.Vector3()).multiplyScalar(s);
   shadow.scale.setScalar(Math.max(0.05, Math.hypot(size.x, size.z) * 0.6) / 0.5);
   $('btn-scale').textContent = realScale ? 'Taille ajustée' : 'Taille réelle';
+  palm?.redraw();
+}
+
+/** Taille du modèle en cm (unités Fusion), ou null. */
+function modelSizeCm() {
+  return fitter.userData.box ? fitter.userData.box.getSize(new THREE.Vector3()) : null;
+}
+
+/** « 120 × 80 × 45 mm » (largeur × hauteur × profondeur, taille réelle Fusion). */
+function dimsText() {
+  const s = modelSizeCm();
+  if (!s) return '';
+  const mm = (v) => String(Math.round(v * 100) / 10); // 0,1 mm près, sans « .0 » inutile
+  return `${mm(s.x)} × ${mm(s.y)} × ${mm(s.z)} mm`;
+}
+
+/** Échelle affichée par rapport à la taille réelle. */
+function scaleText() {
+  const k = (realScale ? 0.01 : fitScale) * modelRoot.scale.x / 0.01;
+  if (Math.abs(k - 1) < 0.02) return 'taille réelle (1:1)';
+  return k > 1 ? `agrandi ×${k.toFixed(k < 10 ? 1 : 0)}` : `réduit 1:${(1 / k).toFixed(1 / k < 10 ? 1 : 0)}`;
 }
 
 function resetView() {
@@ -183,7 +210,11 @@ function toggleScale() {
   realScale = !realScale;
   modelRoot.scale.setScalar(1);
   applyScale();
-  updateHud();
+}
+
+function zoom(f) {
+  modelRoot.scale.setScalar(THREE.MathUtils.clamp(modelRoot.scale.x * f, 0.02, 50));
+  palm?.redraw();
 }
 
 async function loadScene() {
@@ -213,7 +244,7 @@ function connect() {
 function updateUI() {
   const bodies = sceneData?.bodies || [];
   $('doc').textContent = bodies.length
-    ? `${sceneData.document || 'Design'} — ${bodies.length} corps`
+    ? `${sceneData.document || 'Design'} — ${bodies.length} corps — ${dimsText()}`
     : (sceneData?.document ? `${sceneData.document} — aucun corps envoyé. Clic droit sur un corps dans Fusion → « Voir dans le casque VR ».`
       : 'En attente de Fusion… Clic droit sur un corps → « Voir dans le casque VR ».');
   const ul = $('bodies');
@@ -300,20 +331,35 @@ for (let i = 0; i < 2; i++) {
   scene.add(tip);
   c.userData.tip = tip;
 
-  c.addEventListener('connected', (e) => { c.userData.source = e.data; line.visible = e.data.targetRayMode !== 'screen'; if (e.data.handedness === 'left') c.add(hud); });
+  c.addEventListener('connected', (e) => { c.userData.source = e.data; line.visible = e.data.targetRayMode !== 'screen'; });
   c.addEventListener('disconnected', () => { release(c); c.userData.source = null; });
   c.addEventListener('selectstart', () => { c.userData.selecting = true; grab(c, 'select'); });
-  c.addEventListener('selectend', () => { c.userData.selecting = false; if (c.userData.grabMode === 'select') release(c); });
+  c.addEventListener('selectend', () => {
+    c.userData.selecting = false;
+    if (c.userData.panelPress) { c.userData.panelPress = false; return; }
+    if (c.userData.grabMode === 'select') release(c);
+  });
   c.addEventListener('squeezestart', () => { c.userData.squeezing = true; grab(c, 'squeeze'); });
   c.addEventListener('squeezeend', () => { c.userData.squeezing = false; if (c.userData.grabMode === 'squeeze') release(c); });
   scene.add(c);
   controllers.push(c);
 }
 
-function intersect(c) {
+function aim(c) {
   tmpMat.identity().extractRotation(c.matrixWorld);
   raycaster.ray.origin.setFromMatrixPosition(c.matrixWorld);
   raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tmpMat);
+}
+
+/** Bouton du panneau de paume visé par la manette (pas avec les mains : on touche). */
+function panelAim(c) {
+  if (!palm || c.userData.source?.hand) return null;
+  aim(c);
+  return palm.buttonFromRay(raycaster);
+}
+
+function intersect(c) {
+  aim(c);
   const targets = [...meshes.values()].filter((m) => m.visible);
   return raycaster.intersectObjects(targets, false)[0] || null;
 }
@@ -322,6 +368,10 @@ let twoHand = null; // { d0, s0 }
 
 function grab(c, mode) {
   if (c.userData.grabbed) return;
+  if (mode === 'select') {
+    const p = panelAim(c);
+    if (p?.id) { c.userData.panelPress = true; palm.press(p.id); pulse(c, 0.5, 40); return; }
+  }
   const other = controllers.find((o) => o !== c);
   // deuxième main sur le modèle déjà tenu -> mise à l'échelle
   if (other.userData.grabbed === modelRoot) {
@@ -405,32 +455,19 @@ function pollGamepads(dt) {
   }
 }
 
-// ---------------------------------------------------------------- HUD (poignet gauche)
-const hudCanvas = document.createElement('canvas');
-hudCanvas.width = 512; hudCanvas.height = 256;
-const hudTex = new THREE.CanvasTexture(hudCanvas);
-hudTex.colorSpace = THREE.SRGBColorSpace;
-const hud = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.08),
-  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true }));
-hud.position.set(0, 0.06, -0.05);
-hud.rotation.x = -Math.PI / 4;
-
-function updateHud() {
-  const g = hudCanvas.getContext('2d');
-  g.clearRect(0, 0, 512, 256);
-  g.fillStyle = 'rgba(22,26,34,0.88)';
-  g.beginPath(); g.roundRect(0, 0, 512, 256, 28); g.fill();
-  g.fillStyle = '#40a0ff'; g.font = 'bold 34px sans-serif';
-  g.fillText('Fusion3D VR', 24, 50);
-  g.fillStyle = '#e8ecf3'; g.font = '28px sans-serif';
-  const n = sceneData?.bodies?.length || 0;
-  g.fillText((sceneData?.document || 'En attente de Fusion').slice(0, 28), 24, 100);
-  g.fillText(`${n} corps • ${realScale ? 'taille réelle' : 'taille ajustée'}`, 24, 142);
-  g.fillStyle = '#9aa4b5'; g.font = '22px sans-serif';
-  g.fillText('Gâchette : saisir  •  2 poignées : zoom', 24, 190);
-  g.fillText('A/Y : réinitialiser  •  B/X : taille réelle', 24, 226);
-  hudTex.needsUpdate = true;
-}
+// ---------------------------------------------------------------- panneau dans la paume
+const palm = new PalmPanel(renderer, scene, [
+  { id: 'reset', label: () => 'Réinitialiser', action: resetView },
+  { id: 'scale', label: () => (realScale ? 'Taille\najustée' : 'Taille\nréelle 1:1'), action: toggleScale },
+  { id: 'rotate', label: () => 'Tourner\n90°', action: () => { modelRoot.rotateOnWorldAxis(THREE.Object3D.DEFAULT_UP, Math.PI / 2); } },
+  { id: 'bigger', label: () => 'Zoom +', action: () => zoom(1.25) },
+  { id: 'smaller', label: () => 'Zoom −', action: () => zoom(0.8) },
+  { id: 'exit', label: () => 'Quitter\nla VR', action: () => renderer.xr.getSession()?.end() },
+], () => [
+  (sceneData?.document || 'En attente de Fusion').slice(0, 26),
+  sceneData?.bodies?.length ? `${sceneData.bodies.length} corps • ${dimsText()}` : 'Aucun corps envoyé',
+  scaleText(),
+]);
 
 // ---------------------------------------------------------------- boucle
 const timer = new THREE.Timer();
@@ -443,10 +480,15 @@ renderer.setAnimationLoop((t) => {
       const d = controllers[0].position.distanceTo(controllers[1].position);
       modelRoot.scale.setScalar(THREE.MathUtils.clamp(twoHand.s0 * d / twoHand.d0, 0.02, 50));
     }
+    palm.update(renderer.xr.getCamera(), environment.visible); // en réalité mixte, on voit ses vraies mains
+    let panelHover = null;
     for (const c of controllers) {
-      const hit = c.userData.grabbed ? null : intersect(c);
+      const p = c.userData.grabbed ? null : panelAim(c);
+      if (p?.id) panelHover = p.id;
+      const hit = c.userData.grabbed || p ? null : intersect(c);
       const ray = c.getObjectByName('ray');
-      ray.scale.z = hit ? hit.distance : 2;
+      ray.visible = !c.userData.source?.hand;
+      ray.scale.z = p ? p.distance : hit ? hit.distance : 2;
       c.userData.tip.visible = !!hit;
       if (hit) c.userData.tip.position.copy(hit.point);
       if (c.userData.hover !== (hit?.object || null)) {
@@ -455,6 +497,7 @@ renderer.setAnimationLoop((t) => {
         if (c.userData.hover) { c.userData.hover.material.emissive?.setHex(0x0d1a28); pulse(c, 0.1, 10); }
       }
     }
+    if (!controllers.some((c) => c.userData.source?.hand)) palm.setHover(panelHover);
   } else {
     orbit.update();
   }
@@ -471,7 +514,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-updateHud();
+window.fusion3d = { palm }; // pour le débogage dans la console
 setupXRButtons();
 connect();
 refresh();

@@ -39,6 +39,15 @@ Voir et manipuler ses modèles **Fusion 360** dans un casque **Meta Quest 3 / 3S
 | Tourner / zoomer | joystick droit ← → / ↑ ↓ | — |
 | Réinitialiser | A (ou Y) | — |
 | Taille réelle ↔ taille ajustée | B (ou X) | — |
+| Panneau de commande | flotte au-dessus de la manette gauche : viser + gâchette | tourner la **paume gauche** vers soi, toucher avec l'index droit |
+
+Le panneau de commande affiche le nom du document, les **dimensions réelles en mm** et l'échelle
+(par ex. « taille réelle (1:1) » ou « agrandi ×2 »). Ses boutons : Réinitialiser, Taille réelle/ajustée,
+Tourner 90°, Zoom +, Zoom −, Quitter la VR.
+
+Le modèle s'affiche **en taille réelle** par défaut. Fusion envoie toujours en cm, quelle que soit
+l'unité du document (mm, po…), donc les dimensions sont justes. Seuls les modèles de plus de 2,5 m
+démarrent en « taille ajustée » (40 cm).
 
 ## Mettre à jour maintenant
 
